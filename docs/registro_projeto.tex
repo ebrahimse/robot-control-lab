@@ -1,0 +1,347 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+\usepackage{lmodern}
+\usepackage{geometry}
+\geometry{top=2.0cm,bottom=2.0cm,left=2.2cm,right=2.2cm}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{fancyhdr}
+\usepackage{microtype}
+\usepackage{titlesec}
+
+\definecolor{codebg}{RGB}{246,248,250}
+\definecolor{codeframe}{RGB}{210,214,220}
+\definecolor{accent}{RGB}{30,80,130}
+
+\hypersetup{colorlinks=true,linkcolor=accent,urlcolor=accent,citecolor=accent}
+\setlist[itemize]{itemsep=2pt,topsep=4pt}
+\setlist[enumerate]{itemsep=2pt,topsep=4pt}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\renewcommand{\arraystretch}{1.18}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
+  frame=single,
+  rulecolor=\color{codeframe},
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  xleftmargin=0.5em,
+  xrightmargin=0.5em,
+  framexleftmargin=0.4em,
+  framexrightmargin=0.4em
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{Projeto ROS 2 + Gazebo}
+\rhead{Modelagem e Controle de Robôs}
+\cfoot{\thepage}
+\setlength{\headheight}{14pt}
+
+\titleformat{\section}{\large\bfseries\color{accent}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.6em}{}
+
+\title{\textbf{Registro de Desenvolvimento do Ambiente de Simulação\\ROS 2 + Gazebo}}
+\author{Disciplina de Modelagem e Controle de Robôs}
+\date{Versão 0.1 -- 10 de setembro de 2026}
+
+\begin{document}
+\maketitle
+
+\begin{center}
+\fbox{\parbox{0.92\textwidth}{
+\textbf{Natureza deste documento.} Este é um registro vivo do projeto. Ele deve ser atualizado ao longo do desenvolvimento para documentar decisões pedagógicas, arquitetura, configuração do ambiente, testes executados, resultados observados e próximos passos. O arquivo-fonte em \LaTeX{} deve ser mantido junto ao repositório do projeto e recompilado a cada marco relevante.
+}}
+\end{center}
+
+\tableofcontents
+\newpage
+
+\section{Objetivo do projeto}
+
+Construir uma bancada virtual de experimentos para a disciplina de Modelagem e Controle de Robôs. O foco da disciplina permanece na modelagem e no controle; ROS 2 e Gazebo devem funcionar como infraestrutura experimental, e não como o principal objeto de aprendizagem.
+
+O fluxo pedagógico pretendido é
+\begin{equation}
+\boxed{\text{Teoria}}\;\longrightarrow\;\boxed{\text{MATLAB}}\;\longrightarrow\;\boxed{\text{ROS 2/Gazebo}}\;\longrightarrow\;\boxed{\text{validação e análise}}.
+\end{equation}
+
+Os alunos deverão ser capazes de:
+\begin{itemize}
+  \item desenvolver modelos cinemáticos e validá-los contra o simulador;
+  \item desenvolver modelos dinâmicos e comparar suas previsões com a física do Gazebo;
+  \item implementar controladores no MATLAB e posteriormente executá-los sobre a planta simulada;
+  \item registrar, visualizar e analisar quantitativamente os resultados experimentais.
+\end{itemize}
+
+\section{Estratégia pedagógica em dois níveis}
+
+\subsection{Manipulador 2R: aprendizagem da ferramenta}
+
+O manipulador 2R será o ambiente introdutório. Seu objetivo é permitir que os alunos aprendam a cadeia ROS 2--Gazebo com um sistema cuja cinemática e dinâmica são suficientemente simples para que erros da ferramenta possam ser separados de erros de modelagem.
+
+A sequência de aprendizagem prevista inclui:
+\begin{itemize}
+  \item execução do simulador;
+  \item leitura de \texttt{/joint\_states};
+  \item identificação de juntas, links, tópicos e frames;
+  \item comando direto por esforço/torque;
+  \item validação de cinemática e Jacobiano;
+  \item registro com \texttt{rosbag2};
+  \item visualização com PlotJuggler;
+  \item geração de gráficos padronizados.
+\end{itemize}
+
+\subsection{Manipuladores Universal Robots: trabalho avaliativo}
+
+O trabalho avaliativo deverá utilizar um manipulador industrial de 6 GDL da família Universal Robots. A arquitetura inicial foi validada com o UR5e.
+
+Uma alternativa pedagogicamente interessante, atualmente em avaliação, é dividir os grupos entre \textbf{UR3e} e \textbf{UR5e}. Ambos pertencem à mesma família de manipuladores de 6 GDL e podem ser tratados com a mesma infraestrutura de software, mas apresentam dimensões e parâmetros físicos diferentes. Isso permite propor trabalhos estruturalmente equivalentes sem fazer com que todos os grupos usem exatamente a mesma planta.
+
+Para reduzir a carga algébrica da dinâmica quando necessário, poderá ser utilizada uma variante com as três juntas do punho fixadas, mantendo ativos os três primeiros graus de liberdade. Os elos do punho não devem ser eliminados fisicamente: suas massas e inércias continuam contribuindo para a dinâmica do braço.
+
+\section{Arquitetura funcional desejada}
+
+A arquitetura conceitual é
+\begin{center}
+\begin{tabular}{c}
+trajetória/referência \\
+$\downarrow$ \\
+controlador desenvolvido pelo aluno \\
+$\downarrow\;\tau$ \\
+\texttt{ros2\_control} \\
+$\downarrow$ \\
+Gazebo \\
+$\downarrow\;q,\dot q,\tau,\text{TF}$ \\
+registro e análise
+\end{tabular}
+\end{center}
+
+A atuação deve ser preferencialmente por esforço, de modo que a lei de controle permaneça explícita no código do aluno. Em particular, deseja-se evitar um controlador de posição interno que esconda a dinâmica relevante para a disciplina.
+
+Para um controlador por torque calculado, por exemplo,
+\begin{equation}
+\tau = M(q)v + C(q,\dot q)\dot q + g(q),
+\end{equation}
+a expressão acima deve ser calculada pelo código do aluno e o ROS deve apenas encaminhar o vetor de torques ao simulador.
+
+\section{Ambiente computacional verificado}
+
+O PC do laboratório foi inspecionado e apresentou a seguinte configuração relevante:
+
+\begin{longtable}{>{\bfseries}p{0.30\textwidth}p{0.62\textwidth}}
+\toprule
+Item & Situação verificada \\
+\midrule
+Sistema operacional & Ubuntu 24.04 LTS \\
+ROS 2 & Jazzy, instalado em \texttt{/opt/ros/jazzy} \\
+Gazebo & Gazebo Sim 8.10.0, família Harmonic \\
+Integração ROS--Gazebo & \texttt{ros\_gz} e \texttt{gz\_ros2\_control} disponíveis \\
+Visualização & RViz2 disponível \\
+Build e desenvolvimento & \texttt{colcon}, Git e Python 3.12 disponíveis \\
+GPU & NVIDIA RTX 5090 com 32 GB \\
+PlotJuggler & Instalado durante a preparação do ambiente \\
+Simulação Universal Robots & \texttt{ur\_simulation\_gz} instalado \\
+\bottomrule
+\end{longtable}
+
+Por decisão de segurança operacional em uma máquina compartilhada, o ambiente ROS \textbf{não foi adicionado ao \texttt{.bashrc}}. Em cada novo terminal usado para o projeto é executado manualmente:
+\begin{lstlisting}
+source /opt/ros/jazzy/setup.bash
+\end{lstlisting}
+
+Essa escolha evita alterações persistentes no ambiente dos demais usuários.
+
+\section{Validação inicial da infraestrutura}
+
+\subsection{Teste oficial do \texttt{gz\_ros2\_control}}
+
+Foi executado o exemplo oficial de controle por esforço. O Gazebo abriu corretamente, o controlador foi carregado e os estados das juntas foram observados via ROS 2. Também foi verificado que \texttt{/joint\_states} publica continuamente posição, velocidade e esforço.
+
+Esse teste confirmou a cadeia básica
+\begin{equation}
+\boxed{\text{Gazebo}}\;\leftrightarrow\;\boxed{\text{gz\_ros2\_control}}\;\leftrightarrow\;\boxed{\text{ROS 2}}.
+\end{equation}
+
+\subsection{UR5e no Gazebo}
+
+O pacote \texttt{ur\_simulation\_gz} foi executado com o UR5e. O launch utilizado aceita, entre outros, os argumentos \texttt{ur\_type}, \texttt{controllers\_file}, \texttt{initial\_joint\_controller}, \texttt{gazebo\_gui} e \texttt{world\_file}.
+
+O modelo expôs, para as seis juntas, interfaces de comando de posição, velocidade e esforço. As interfaces de estado incluem também posição, velocidade e esforço.
+
+\subsection{Configuração local para comando direto de torque}
+
+Foi criada uma configuração local, sem modificar os arquivos oficiais em \texttt{/opt/ros}, no diretório
+\begin{lstlisting}
+~/robot_control_lab/config/ur_controllers_effort.yaml
+\end{lstlisting}
+
+A configuração utiliza
+\begin{lstlisting}
+effort_controllers/JointGroupEffortController
+\end{lstlisting}
+para as juntas, na ordem física adotada pelo projeto:
+\begin{enumerate}
+  \item \texttt{shoulder\_pan\_joint}
+  \item \texttt{shoulder\_lift\_joint}
+  \item \texttt{elbow\_joint}
+  \item \texttt{wrist\_1\_joint}
+  \item \texttt{wrist\_2\_joint}
+  \item \texttt{wrist\_3\_joint}
+\end{enumerate}
+
+Ao iniciar o UR5e com essa configuração, o \texttt{forward\_effort\_controller} ficou ativo e as seis interfaces \texttt{effort} ficaram marcadas como \texttt{claimed}.
+
+\subsection{Teste de torque no UR5e}
+
+Foi publicado continuamente o vetor
+\begin{equation}
+\tau = [5,\;0,\;0,\;0,\;0,\;0]^T\;\mathrm{N\,m}.
+\end{equation}
+
+O tópico de comando confirmou o vetor publicado e \texttt{/joint\_states} registrou exatamente \texttt{5.0} no esforço correspondente à \texttt{shoulder\_pan\_joint}. Assim, ficou validado que um torque calculado externamente pode ser aplicado diretamente ao modelo do UR5e no Gazebo.
+
+\section{Convenção de ordenação das variáveis}
+
+Foi observado que a ordem de juntas publicada em \texttt{/joint\_states} não necessariamente coincide com a ordem física usada nas equações do robô. No teste do UR5e, a mensagem foi recebida na ordem
+\begin{lstlisting}
+elbow_joint
+shoulder_lift_joint
+shoulder_pan_joint
+wrist_1_joint
+wrist_2_joint
+wrist_3_joint
+\end{lstlisting}
+
+A infraestrutura da disciplina \textbf{não deve depender dessa ordem}. O nó de interface deve associar cada valor ao nome da junta e, imediatamente após a leitura, reorganizar os estados na convenção matemática
+\begin{equation}
+q = [q_1,q_2,\ldots,q_n]^T,\qquad
+\dot q = [\dot q_1,\dot q_2,\ldots,\dot q_n]^T.
+\end{equation}
+
+Para o UR5e, a convenção interna será
+\begin{align*}
+q_1 &\leftrightarrow \texttt{shoulder\_pan\_joint},\\
+q_2 &\leftrightarrow \texttt{shoulder\_lift\_joint},\\
+q_3 &\leftrightarrow \texttt{elbow\_joint},\\
+q_4 &\leftrightarrow \texttt{wrist\_1\_joint},\\
+q_5 &\leftrightarrow \texttt{wrist\_2\_joint},\\
+q_6 &\leftrightarrow \texttt{wrist\_3\_joint}.
+\end{align*}
+
+A mesma filosofia será usada no 2R, com $q=[q_1,q_2]^T$ e $\tau=[\tau_1,\tau_2]^T$.
+
+\section{Aquisição, visualização e geração de resultados}
+
+A estratégia planejada combina três ferramentas:
+\begin{itemize}
+  \item \textbf{PlotJuggler}: visualização interativa em tempo real durante os experimentos;
+  \item \textbf{rosbag2}: registro reprodutível dos sinais de cada ensaio;
+  \item \textbf{Python/matplotlib}: geração automática de gráficos e métricas padronizadas para os relatórios.
+\end{itemize}
+
+Os resultados desejados incluem, conforme a atividade:
+\begin{itemize}
+  \item $q_d(t)$ e $q(t)$;
+  \item erro $e(t)$;
+  \item $\dot q(t)$;
+  \item torque $\tau(t)$;
+  \item posição e/ou orientação cartesiana do efetuador;
+  \item métricas como RMSE, máximo erro absoluto, esforço máximo e integrais de erro.
+\end{itemize}
+
+\section{Container e distribuição aos alunos}
+
+O desenvolvimento inicial será realizado nativamente no PC do laboratório, onde a configuração ROS/Gazebo já foi validada. O container será construído \textbf{depois que a cadeia nativa estiver estável}, evitando depurar simultaneamente ROS, Gazebo, GPU, Docker e o código didático.
+
+O container deverá oferecer:
+\begin{itemize}
+  \item execução headless obrigatória;
+  \item GUI opcional para Gazebo/PlotJuggler;
+  \item dependências congeladas;
+  \item comandos de alto nível para iniciar experimentos;
+  \item volume para os arquivos modificados pelos alunos.
+\end{itemize}
+
+\section{Decisões consolidadas até esta versão}
+
+\begin{enumerate}
+  \item ROS 2 e Gazebo serão infraestrutura da disciplina, não o principal conteúdo avaliado.
+  \item O 2R será utilizado para aprender a ferramenta e o fluxo experimental.
+  \item Um manipulador Universal Robots de 6 GDL será utilizado no trabalho avaliativo.
+  \item O comando de controle será preferencialmente por torque/esforço explícito.
+  \item A ordem interna das variáveis será padronizada e construída a partir dos nomes das juntas.
+  \item A infraestrutura não deve calcular automaticamente os modelos ou leis de controle que fazem parte do trabalho dos alunos.
+  \item O desenvolvimento será estabilizado nativamente antes da criação do container.
+  \item Alterações específicas do projeto permanecerão no diretório/repositório do projeto, evitando modificar arquivos oficiais do ROS sempre que possível.
+\end{enumerate}
+
+\section{Próximos passos}
+
+O próximo marco é retornar à ordem pedagógica planejada e construir o ambiente 2R. A sequência sugerida é:
+\begin{enumerate}
+  \item verificar os pacotes 2R/RRBot disponíveis na instalação Jazzy;
+  \item executar o 2R no Gazebo;
+  \item garantir comando direto de torque em suas duas juntas;
+  \item criar um primeiro nó Python de interface que leia \texttt{/joint\_states}, reorganize os estados por nome e publique $\tau$;
+  \item testar aquisição com rosbag2 e visualização com PlotJuggler;
+  \item implementar um primeiro controlador PD e registrar um experimento completo;
+  \item automatizar gráficos e métricas;
+  \item reutilizar a mesma arquitetura para UR3e/UR5e;
+  \item definir a forma final de redução para três GDL, caso seja adotada no trabalho;
+  \item criar e testar o container dos alunos.
+\end{enumerate}
+
+\section{Comandos de referência já utilizados}
+
+\subsection{Ativação do ambiente ROS}
+\begin{lstlisting}
+source /opt/ros/jazzy/setup.bash
+\end{lstlisting}
+
+\subsection{Abertura do UR5e com controlador de esforço}
+\begin{lstlisting}
+ros2 launch ur_simulation_gz ur_sim_control.launch.py \
+  ur_type:=ur5e \
+  controllers_file:=$HOME/robot_control_lab/config/ur_controllers_effort.yaml \
+  initial_joint_controller:=forward_effort_controller
+\end{lstlisting}
+
+\subsection{Inspeção de controladores e interfaces}
+\begin{lstlisting}
+ros2 control list_controllers
+ros2 control list_hardware_interfaces
+ros2 topic echo /joint_states --once
+\end{lstlisting}
+
+\subsection{Teste de comando por torque}
+\begin{lstlisting}
+ros2 topic pub -r 20 \
+  /forward_effort_controller/commands \
+  std_msgs/msg/Float64MultiArray \
+  "{data: [5.0, 0.0, 0.0, 0.0, 0.0, 0.0]}"
+\end{lstlisting}
+
+\section{Histórico de versões}
+
+\begin{tabular}{p{0.14\textwidth}p{0.20\textwidth}p{0.58\textwidth}}
+\toprule
+\textbf{Versão} & \textbf{Data} & \textbf{Conteúdo} \\
+\midrule
+0.1 & 10/09/2026 & Consolidação da estratégia, inventário do ambiente, validação de \texttt{gz\_ros2\_control}, teste do UR5e por esforço, convenção de juntas e definição dos próximos passos. \\
+\bottomrule
+\end{tabular}
+
+\end{document}
